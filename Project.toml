@@ -1,0 +1,4 @@
+name = "attitudeAnalysisFunctions"
+uuid = "ceb9cd4c-dafe-46cb-b5d1-0e485c818a73"
+authors = ["Stephen Gagnon <srgagnon@buffalo.edu>"]
+version = "0.1.0"
