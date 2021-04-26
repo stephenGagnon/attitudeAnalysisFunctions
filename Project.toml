@@ -2,3 +2,10 @@ name = "attitudeAnalysisFunctions"
 uuid = "ceb9cd4c-dafe-46cb-b5d1-0e485c818a73"
 authors = ["Stephen Gagnon <srgagnon@buffalo.edu>"]
 version = "0.1.0"
+
+[deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+Infiltrator = "5903a43b-9cc3-4c30-8d17-598619ec4e9b"
+SharedArrays = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
+attitudeFunctions = "7493c2ef-4a11-4f18-aeab-b8ca9ae8f56a"
+lightCurveOptimization = "080a2550-1630-41fe-8750-c8cca3fe9c02"
