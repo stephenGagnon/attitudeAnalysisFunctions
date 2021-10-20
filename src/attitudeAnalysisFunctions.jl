@@ -87,8 +87,7 @@ function singleAttAnalysis(Atrue :: anyAttitude, params :: Union{PSO_parameters,
     elseif options.algorithm == :MPSO_AVC
 
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
-        clusterFunc = (x,N,cl) -> cl[:] = (
-        assignments(kmeans(x,N)))
+        clusterFunc = (x,N,cl) -> cl[:] = (assignments(kmeans(x,N)))
 
         if options.initMethod == "random"
             xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
