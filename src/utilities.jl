@@ -28,15 +28,15 @@ function GBcleanup(results :: optimizationResults)
         end
         (minf, minx, ret) = optimize(opt,xinit)
 
-        if f(minx,[0;0;0.0]) != minf
-            @infiltrate
-        end
-        if any(isnan.(minx)) | any(isnan.(p2q(minx)))
-            @infiltrate
-        end
-        if abs(norm(p2q(minx))-1) > .000001
-            @infiltrate
-        end
+        # if f(minx,[0;0;0.0]) != minf
+        #     # @infiltrate
+        # end
+        # if any(isnan.(minx)) | any(isnan.(p2q(minx)))
+        #     @infiltrate
+        # end
+        # if abs(norm(p2q(minx))-1) > .000001
+        #     @infiltrate
+        # end
         cleaned_xopt[:,i] = p2q(minx)
         cleaned_fopt[i] = minf
     end
@@ -128,7 +128,6 @@ function processScenarioInputs(object, scenario, options)
 end
 
 function analyzeRandomAttitudeConvergence(results)
-
 
     (optConv, optErrAng, clConv, clErrAng) = checkConvergence(results)
     N = length(optConv)

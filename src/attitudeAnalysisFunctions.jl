@@ -10,7 +10,7 @@ using SharedArrays
 using JLD2
 using MATLABfunctions
 using Colors
-using Infiltrator
+# using Infiltrator
 
 import Clustering: kmeans, kmedoids, assignments
 
@@ -25,28 +25,24 @@ const Num = N where N <: Number
 
 include("utilities.jl")
 
-export randomAttAnalysis, generateLMData, findLevelSets, GBcleanup, monteCarloAttAnalysis, singleAttAnalysis, analyzeRandomAttitudeConvergence, optimizationComparison
+export randomAttAnalysis, generateLMData, findLevelSets, GBcleanup, monteCarloAttAnalysis, singleAttAnalysis, analyzeRandomAttitudeConvergence, optimizationComparison, multiAttAnalysis
 
-function monteCarloAttAnalysis(Atrue :: anyAttitude, N :: Int64, params :: Union{PSO_parameters,GB_parameters}, options = optimizationOptions() :: optimizationOptions; a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+function monteCarloAttAnalysis(Atrue :: anyAttitude, N :: Int64; params = PSO_parameters(), options = optimizationOptions(), a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
 
     sat, satFull, scen = processScenarioInputs(object, scenario, options)
 
-    if any(options.algorithm .== [:MPSO,:PSO_cluster,:MPSO_AVC])
-        resultsFull = Array{PSO_results,1}(undef,N)
-    elseif any(options.algorithm .== [:LD_SLSQP])
-        resultsFull = Array{GB_results,1}(undef,N)
-    else
-        @infiltrate
-    end
+    resultsFull = Array{optimizationResults,1}(undef,N)
 
     for i = 1:N
-        resultsFull[i] = singleAttAnalysis(Atrue, params, options, a = 1.0 , f = 1.0, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+         temp = singleAttAnalysis(Atrue, params = params, otpions = options, a = 1.0 , f = 1.0, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+
+        resultsFull[i] = optimizationResults(temp, sat, satFull, scen, params, Atrue, options)
     end
 
-    return optimizationResults(resultsFull, sat, satFull, scen, params, trueAttitudes, options)
+    return resultsFull
 end
 
-function singleAttAnalysis(Atrue :: anyAttitude, params :: Union{PSO_parameters,GB_parameters}, options = optimizationOptions() :: optimizationOptions; a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), options = optimizationOptions(), a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
 
     # if object[1] == :simple
     #     (sat, satFull) = simpleSatellite(vectorized = options.vectorizeCost)
@@ -192,15 +188,15 @@ function singleAttAnalysis(Atrue :: anyAttitude, params :: Union{PSO_parameters,
             end
             (minf, minx, ret) = optimize(opt,xinit)
 
-            if gbf(minx,[0;0;0.0]) != minf
-                @infiltrate
-            end
-            if any(isnan.(minx)) | any(isnan.(p2q(minx)))
-                @infiltrate
-            end
-            if abs(norm(p2q(minx))-1) > .000001
-                @infiltrate
-            end
+            # if gbf(minx,[0;0;0.0]) != minf
+            #     @infiltrate
+            # end
+            # if any(isnan.(minx)) | any(isnan.(p2q(minx)))
+            #     @infiltrate
+            # end
+            # if abs(norm(p2q(minx))-1) > .000001
+            #     @infiltrate
+            # end
             if options.algorithm == :MPSO
                 cleaned_xopt[:,i] = p2q(minx)
             else
@@ -222,36 +218,38 @@ function singleAttAnalysis(Atrue :: anyAttitude, params :: Union{PSO_parameters,
     return resultsOut
 end
 
-function randomAttAnalysis(N :: Int64, params :: Union{PSO_parameters,GB_parameters}, options = optimizationOptions() :: optimizationOptions; object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+function randomAttAnalysis(N :: Int64; params = PSO_parameters(), options = optimizationOptions(), object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
 
     sat, satFull, scen = processScenarioInputs(object, scenario, options)
 
     trueAttitudes = randomAtt(N,DCM,options.vectorizeOptimization)
 
-    # resultsFull = SharedArray{PSO_results,1}(undef,N)
-    if any(options.algorithm .== [:MPSO,:MPSO_VGC,:PSO_cluster,:MPSO_AVC])
-        resultsFull = Array{PSO_results,1}(undef,N)
-    elseif any(options.algorithm .== [:LD_SLSQP])
-        resultsFull = Array{GB_results,1}(undef,N)
-    else
-        @infiltrate
-    end
+    return multiAttAnalysis(N, trueAttitudes, params = params, options = options, object = (:custom,(sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+end
 
+function multiAttAnalysis(N :: Int64, Attitudes; params = PSO_parameters(), options = optimizationOptions(), object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+
+    sat, satFull, scen = processScenarioInputs(object, scenario, options)
+
+    resultsFull = Array{optimizationResults,1}(undef,N)
 
     for i = 1:N
 
         if N>1
-            A = trueAttitudes[i]
+            A = Attitudes[i]
         elseif N == 1
-            A = trueAttitudes
+            A = Attitudes
         end
 
-        resultsFull[i] = singleAttAnalysis(A, params, options, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+        resultsFullTemp = singleAttAnalysis(A, params = params, options = options, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+
+        resultsFull[i] = optimizationResults(resultsFullTemp, sat, satFull, scen, params, A, options)
 
     end
 
-    return optimizationResults(resultsFull, sat, satFull, scen, params, trueAttitudes, options)
+    return resultsFull
 end
+
 
 function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizationOptions, params1 :: Union{PSO_parameters,GB_parameters}, params2 :: Union{PSO_parameters,GB_parameters}, N :: Int64; object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = (false,false))
 
@@ -259,23 +257,8 @@ function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizatio
 
     trueAttitudes = randomAtt(N,DCM,opt1.vectorizeOptimization)
 
-    # resultsFull = SharedArray{PSO_results,1}(undef,N)
-    if any(opt1.algorithm .== [:MPSO,:MPSO_VGC,:PSO_cluster,:MPSO_AVC])
-        resultsFull1 = Array{PSO_results,1}(undef,N)
-    elseif any(options.algorithm .== [:LD_SLSQP])
-        resultsFull1 = Array{GB_results,1}(undef,N)
-    else
-        @infiltrate
-    end
-
-    if any(opt2.algorithm .== [:MPSO,:MPSO_VGC,:PSO_cluster,:MPSO_AVC])
-        resultsFull2 = Array{PSO_results,1}(undef,N)
-    elseif any(options.algorithm .== [:LD_SLSQP])
-        resultsFull2 = Array{GB_results,1}(undef,N)
-    else
-        @infiltrate
-    end
-
+    resultsFull1 = Array{optimizationResults,1}(undef,N)
+    resultsFull2 = Array{optimizationResults,1}(undef,N)
 
     for i = 1:N
 
@@ -285,12 +268,16 @@ function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizatio
             A = trueAttitudes
         end
 
-        resultsFull1[i] = singleAttAnalysis(A, params1, opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
+        rF1 = singleAttAnalysis(A, params1, opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
 
-        resultsFull2[i] = singleAttAnalysis(A, params2, opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
+        rf2 = singleAttAnalysis(A, params2, opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
+
+        resultsFull1[i] = optimizationResults(rF1, sat, satFull, scen, params1, trueAttitudes[i], opt1)
+
+        resultsFull2[i] = optimizationResults(rF2, sat, satFull, scen, params2, trueAttitudes[i], opt2)
     end
 
-    return (optimizationResults(resultsFull1, sat, satFull, scen, params1, trueAttitudes, opt1), optimizationResults(resultsFull2, sat, satFull, scen, params2, trueAttitudes, opt2))
+    return (resultsFull1, resultsFull2)
 end
 
 
