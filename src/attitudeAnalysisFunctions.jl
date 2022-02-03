@@ -124,6 +124,34 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
             error("Please provide valid particle initialization method")
         end
         results = MPSO_cluster(xinit,costFunc,clusterFunc,params)
+
+    elseif options.algorithm == :MPSO_NVC
+
+        costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
+
+        if (options.Parameterization == MRP) | (options.Parameterization == GRP)
+            rotFunc = ((A,v) -> p2A(A,a,f)*v) :: Function
+            dDotFunc = ((v1,v2,att) -> -dDotdp(v1,v2,-att))
+        elseif options.Parameterization == quaternion
+            rotFunc = qRotate :: Function
+            dDotFunc = ((v1,v2,att) -> qinv(dDotdq(v1,v2,qinv(att))))
+        else
+            error("Please provide a valid attitude representation type. Options are:
+            'MRP' (modified Rodrigues parameters), 'GRP' (generalized Rodrigues parameters),
+            or 'quaternion' ")
+        end
+
+        clusterFunc = (x :: ArrayOfVecs, N :: Int64, ind :: Vector{Int64}) -> normVecClustering(x :: ArrayOfVecs, ind :: Vector{Int64}, sat :: targetObject, scen :: spaceScenario, rotFunc :: Function)
+
+        if options.initMethod == "random"
+            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
+        elseif coptions.initMethod == "specified"
+            xinit = initialParticleDistribution
+        else
+            error("Please provide valid particle initialization method")
+        end
+        results = MPSO_cluster(xinit,costFunc,clusterFunc,params)
+
     elseif options.algorithm == :PSO_cluster
 
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
@@ -250,7 +278,6 @@ function multiAttAnalysis(N :: Int64, Attitudes; params = PSO_parameters(), opti
     return resultsFull
 end
 
-
 function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizationOptions, params1 :: Union{PSO_parameters,GB_parameters}, params2 :: Union{PSO_parameters,GB_parameters}, N :: Int64; object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = (false,false))
 
     sat, satFull, scen = processScenarioInputs(object, scenario, opt1)
@@ -268,9 +295,9 @@ function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizatio
             A = trueAttitudes
         end
 
-        rF1 = singleAttAnalysis(A, params1, opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
+        rF1 = singleAttAnalysis(A, params = params1, options = opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
 
-        rf2 = singleAttAnalysis(A, params2, opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
+        rf2 = singleAttAnalysis(A, params = params2, options = opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
 
         resultsFull1[i] = optimizationResults(rF1, sat, satFull, scen, params1, trueAttitudes[i], opt1)
 
