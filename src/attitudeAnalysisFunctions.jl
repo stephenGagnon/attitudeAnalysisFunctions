@@ -4,13 +4,14 @@ using attitudeFunctions
 using LinearAlgebra
 using Random
 using lightCurveOptimization
+using lightCurveModeling
 using Distributed
 using NLopt
 using SharedArrays
 using JLD2
 using MATLABfunctions
 using Colors
-# using Infiltrator
+using Infiltrator
 
 import Clustering: kmeans, kmedoids, assignments
 
@@ -42,29 +43,8 @@ function monteCarloAttAnalysis(Atrue :: anyAttitude, N :: Int64; params = PSO_pa
     return resultsFull
 end
 
-function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), options = optimizationOptions(), a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+function _singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), options = optimizationOptions(), a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
 
-    # if object[1] == :simple
-    #     (sat, satFull) = simpleSatellite(vectorized = options.vectorizeCost)
-    # elseif object[1] == :modified
-    #     (sat, satFull) = customSatellite(object[2], vectorized = options.vectorizeCost)
-    # elseif object[1] == :custom
-    #     (sat, satFull) = object[2]
-    # else
-    #     error("Please Provide valid object specifiction. Options are:
-    #     :simple, :custom")
-    # end
-    #
-    # if scenario[1] == :simple
-    #     scen = simpleScenario(vectorized = options.vectorizeCost)
-    # elseif scenario[1] == :modified
-    #     scen = customScenario(scenario[2],vectorized = options.vectorizeCost)
-    # elseif object[1] == :custom
-    #     scen = object[2]
-    # else
-    #     error("Please Provide valid object specifiction. Options are:
-    #     'simple scenario'")
-    # end
     sat, satFull, scen = processScenarioInputs(object, scenario, options)
 
     if options.algorithm == :MPSO
@@ -72,27 +52,29 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
         clusterFunc = (x,N,cl) -> cl[:] = (assignments(kmeans(x,N)))
 
-        if options.initMethod == "random"
-            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
-        elseif options.initMethod == "specified"
-            xinit = initialParticleDistribution
+        if options.initMethod == :random
+            xinit = randomAtt(1,options.Parameterization)
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
         results = MPSO_cluster(xinit,costFunc,clusterFunc,params)
+
     elseif options.algorithm == :MPSO_AVC
 
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
         clusterFunc = (x,N,cl) -> cl[:] = (assignments(kmeans(x,N)))
 
-        if options.initMethod == "random"
-            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
-        elseif coptions.initMethod == "specified"
-            xinit = initialParticleDistribution
+        if options.initMethod == :random
+            xinit = randomAtt(1,options.Parameterization)
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
         results = MPSO_AVC(xinit,costFunc,clusterFunc,params)
+
     elseif options.algorithm == :MPSO_VGC
 
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
@@ -116,10 +98,10 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
         # clusterFunc = ((x :: ArrayOfVecs,N :: Int64, ind :: Vector{Int64})-> sunVisGroupClustering(x :: ArrayOfVecs, N :: Int64, ind :: Vector{Int64}, visGroups :: Vector{sunVisGroup}, sat :: targetObject, scen :: spaceScenario, rotFunc :: Function)) :: Function
 
 
-        if options.initMethod == "random"
-            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
-        elseif coptions.initMethod == "specified"
-            xinit = initialParticleDistribution
+        if options.initMethod == :random
+            xinit = randomAtt(1,options.Parameterization)
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
@@ -143,10 +125,10 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
 
         clusterFunc = (x :: ArrayOfVecs, N :: Int64, ind :: Vector{Int64}) -> normVecClustering(x :: ArrayOfVecs, ind :: Vector{Int64}, sat :: targetObject, scen :: spaceScenario, rotFunc :: Function)
 
-        if options.initMethod == "random"
-            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
-        elseif coptions.initMethod == "specified"
-            xinit = initialParticleDistribution
+        if options.initMethod == :random
+            xinit = randomAtt(1,options.Parameterization)
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
@@ -155,10 +137,10 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
     elseif options.algorithm == :PSO_cluster
 
         costFunc = costFuncGenPSO(sat,scen,Atrue,options,a,f)
-        if options.initMethod == "random"
-            xinit = randomAtt(params.N,options.Parameterization,options.vectorizeOptimization)
-        elseif coptions.initMethod == "specified"
-            xinit = initialParticleDistribution
+        if options.initMethod == :random
+            xinit = randomAtt(1,options.Parameterization)
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
@@ -166,12 +148,12 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
         if options.vectorizeOptimization
             results = Convert_PSO_results(results,options.Parameterization,a,f)
         end
-    elseif any(options.algorithm .== [:LD_SLSQP])
 
-        if options.initMethod == "random"
+    elseif any(options.algorithm .== [:LD_SLSQP])
+        if options.initMethod == :random
             xinit = randomAtt(1,options.Parameterization)
-        elseif coptions.initMethod == "specified"
-            xinit = initialParticleDistribution
+        elseif options.initMethod == :specified
+            xinit = options.initVals
         else
             error("Please provide valid particle initialization method")
         end
@@ -185,7 +167,6 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
         opt.maxeval = params.maxeval
         opt.maxtime = params.maxtime
         (minf, minx, ret) = optimize(opt,xinit)
-
         results = GB_results(minf,minx,ret)
     end
 
@@ -246,6 +227,15 @@ function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), opti
     return resultsOut
 end
 
+function singleAttAnalysis(Atrue :: anyAttitude; params = PSO_parameters(), options = optimizationOptions(), a = 1.0 , f = 1.0, object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
+
+    sat, satFull, scen = processScenarioInputs(object, scenario, options)
+
+    results = _singleAttAnalysis(Atrue; params = params, options = options, a = a , f = f, object = object, scenario = scenario, GBcleanup = GBcleanup)
+
+    return optimizationResults(results, sat, satFull, scen, params, Atrue, options)
+end
+
 function randomAttAnalysis(N :: Int64; params = PSO_parameters(), options = optimizationOptions(), object = (:simple,nothing), scenario = (:simple,nothing), GBcleanup = false)
 
     sat, satFull, scen = processScenarioInputs(object, scenario, options)
@@ -269,7 +259,7 @@ function multiAttAnalysis(N :: Int64, Attitudes; params = PSO_parameters(), opti
             A = Attitudes
         end
 
-        resultsFullTemp = singleAttAnalysis(A, params = params, options = options, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
+        resultsFullTemp = _singleAttAnalysis(A, params = params, options = options, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup)
 
         resultsFull[i] = optimizationResults(resultsFullTemp, sat, satFull, scen, params, A, options)
 
@@ -295,9 +285,9 @@ function optimizationComparison(opt1 :: optimizationOptions, opt2 :: optimizatio
             A = trueAttitudes
         end
 
-        rF1 = singleAttAnalysis(A, params = params1, options = opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
+        rF1 = _singleAttAnalysis(A, params = params1, options = opt1, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[1])
 
-        rf2 = singleAttAnalysis(A, params = params2, options = opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
+        rf2 = _singleAttAnalysis(A, params = params2, options = opt2, object = (:custom, (sat,satFull)), scenario = (:custom,scen), GBcleanup = GBcleanup[2])
 
         resultsFull1[i] = optimizationResults(rF1, sat, satFull, scen, params1, trueAttitudes[i], opt1)
 
