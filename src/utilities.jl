@@ -1,8 +1,8 @@
-function GBcleanup(results :: optimizationResults)
+function GBcleanup(results :: LMoptimizationResults)
 
     options = optimizationOptions(Parameterization = MRP, algorithm = :LD_SLSQP)
     opt = Opt(options.algorithm,3)
-    f = costFuncGenNLopt(results.object,results.scenario,results.trueAttitude,options,1.0,1.0)
+    f = costFuncGenNLopt(results.trueState, results.problem, options)
     opt.min_objective = f
     opt.lower_bounds = [-1;-1;-1]
     opt.upper_bounds = [1;1;1]
@@ -17,7 +17,7 @@ function GBcleanup(results :: optimizationResults)
     cleaned_fopt = similar(cluster_fopt)
 
     for i = 1:size(cluster_xopt,1)
-        if options.algorithm == :MPSO
+        if results.options.Parameterization == quaternion
             xinit = q2p(cluster_xopt[i,:])
         else
             xinit = cluster_xopt[i,:]
@@ -28,28 +28,18 @@ function GBcleanup(results :: optimizationResults)
         end
         (minf, minx, ret) = optimize(opt,xinit)
 
-        # if f(minx,[0;0;0.0]) != minf
-        #     # @infiltrate
-        # end
-        # if any(isnan.(minx)) | any(isnan.(p2q(minx)))
-        #     @infiltrate
-        # end
-        # if abs(norm(p2q(minx))-1) > .000001
-        #     @infiltrate
-        # end
         cleaned_xopt[:,i] = p2q(minx)
         cleaned_fopt[i] = minf
     end
 
     (fopt,minind) = findmin(cleaned_fopt)
-    Prc = PSO_results(Pr.xHist, Pr.fHist, Pr.xOptHist, Pr.fOptHist, Pr.clusterxOptHist,
-     Pr.clusterfOptHist, cleaned_xopt[:,minind], fopt)
 
-    return optimizationResults(Prc,results.object,results.objectFullData,results.scenario,
-    results.PSO_params,results.trueAttitude,results.options)
+    Prc = PSO_results(Pr.xHist, Pr.fHist, Pr.xOptHist, Pr.fOptHist, Pr.clusterxOptHist, Pr.clusterfOptHist, cleaned_xopt[:,minind], fopt)
+
+    return LMoptimizationResults(Prc, results.trueState, results.problem, results.options)
 end
 
-function generateLMData(N;Atrue = nothing)
+function generateLMData(N; Atrue = nothing)
 
     att = randomAttPar(N,MRP)
     (sat,_, scen) = simpleScenarioGenerator(vectorized = false)
@@ -103,9 +93,9 @@ end
 function processScenarioInputs(object, scenario, options)
 
     if object[1] == :simple
-        sat, satFull = simpleSatellite(vectorized = options.vectorizeCost)
+        sat, satFull = simpleSatellite(vectorized = options.vectorize)
     elseif object[1] == :modified
-        sat, satFull = customSatellite(object[2], vectorized = options.vectorizeCost)
+        sat, satFull = customSatellite(object[2], vectorized = options.vectorize)
     elseif object[1] == :custom
         (sat, satFull) = object[2]
     else
@@ -116,7 +106,7 @@ function processScenarioInputs(object, scenario, options)
     if scenario[1] == :simple
         scen = simpleScenario(vectorized = options.vectorizeCost)
     elseif scenario[1] == :modified
-        scen = customScenario(scenario[2],vectorized = options.vectorizeCost)
+        scen = customScenario(scenario[2],vectorized = options.vectorize)
     elseif object[1] == :custom
         scen = scenario[2]
     else
