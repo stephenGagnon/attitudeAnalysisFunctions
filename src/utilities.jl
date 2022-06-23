@@ -90,33 +90,6 @@ function findLevelSets(loadFileName,saveFileName,LMt,tol)
     # return levelsets, levelsetLM
 end
 
-function processScenarioInputs(object, scenario, options)
-
-    if object[1] == :simple
-        sat, satFull = simpleSatellite(vectorized = options.vectorize)
-    elseif object[1] == :modified
-        sat, satFull = customSatellite(object[2], vectorized = options.vectorize)
-    elseif object[1] == :custom
-        (sat, satFull) = object[2]
-    else
-        error("Please Provide valid object specifiction. Options are:
-        :simple, :custom")
-    end
-
-    if scenario[1] == :simple
-        scen = simpleScenario(vectorized = options.vectorizeCost)
-    elseif scenario[1] == :modified
-        scen = customScenario(scenario[2],vectorized = options.vectorize)
-    elseif object[1] == :custom
-        scen = scenario[2]
-    else
-        error("Please Provide valid object specifiction. Options are:
-        'simple scenario'")
-    end
-
-    return sat, satFull, scen
-end
-
 function analyzeRandomAttitudeConvergence(results)
 
     (optConv, optErrAng, clConv, clErrAng) = checkConvergence(results)

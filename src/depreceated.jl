@@ -179,5 +179,3 @@
 #     if options.vectorizeOptimization
 #         results = Convert_PSO_results(results,options.Parameterization,a,f)
 #     end
-
-end # module

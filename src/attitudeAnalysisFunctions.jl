@@ -12,6 +12,7 @@ using MATLABfunctions
 using Colors
 using Infiltrator
 using ProgressMeter
+using Accessors
 
 import Clustering: kmeans, kmedoids, assignments
 
@@ -22,26 +23,31 @@ const ArrayofMats{T<:Number} = Array{M,1} where M <: Mat
 const MatOrVecs = Union{Mat,ArrayOfVecs}
 const MatOrVec = Union{Mat,Vec}
 const anyAttitude = Union{Mat,Vec,DCM,MRP,GRP,quaternion}
-const Num = N where N <: Number
 
 include("utilities.jl")
 
-export randomAttAnalysis, generateLMData, findLevelSets, GBcleanup, monteCarloAttAnalysis, singleAttAnalysis, analyzeRandomAttitudeConvergence, optimizationComparison, multiAttAnalysis, randomStateAnalysis
+export randomAttAnalysis, generateLMData, findLevelSets, monteCarloAttAnalysis, singleAttAnalysis, analyzeRandomAttitudeConvergence, optimizationComparison, multiAttAnalysis, randomStateAnalysis
 
-function monteCarloAttAnalysis(trueState :: Vector, N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function monteCarloAttAnalysis(trueState :: Vector, N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(); show_progress = true)
 
     resultsFull = Array{LMoptimizationResults,1}(undef,N)
+    if show_progress
+        print("Running Optimization")
+        p = Progress(N);
+    end
 
     for i = 1:N
-         temp = singleAttAnalysis(trueState, LMproblem, options, GBcleanup)
-
-        resultsFull[i] = LMoptimizationResults(temp, trueState, LMproblem, options)
+        resultsFull[i] = singleAttAnalysis(trueState, LMproblem, options)
+        if show_progress
+            sleep(.1)
+            next!(p)
+        end
     end
 
     return resultsFull
 end
 
-function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
     if any(options.algorithm .== [:MPSO, :MPSO_VGC, :MPSO_NVC, :PSO_cluster, :MPSO_full_state])
 
@@ -61,7 +67,7 @@ function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProbl
         end
         results = MPSO_AVC(xinit, costFunc, clusterFunc, options.optimizationParams)
 
-    elseif any(options.algorithm .== [:LD_SLSQP])
+    elseif any(options.algorithm .== [:LD_SLSQP, :GN_CRS2_LM, :G_MLSL, :GD_STOGO, :GN_AGS, :GN_ISRES])
 
         if options.initMethod == :random
             xinit = randomAtt(1, options.Parameterization)
@@ -74,77 +80,25 @@ function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProbl
         if any(abs.(xinit) .> 1)
             xinit = sMRP(xinit)
         end
+        # @infiltrate
+        options = @set options.initVals = xinit
+        costFunc = costFuncGenFD(trueState, LMproblem)
+        (minf, minx, ret) = GB_main(costFunc, options)
 
-        opt = Opt(options.algorithm,3)
-        opt.min_objective = costFuncGenNLopt(trueState, LMproblem)
-        opt.lower_bounds = [-1;-1;-1]
-        opt.upper_bounds = [1;1;1]
-        opt.maxeval = options.optimizationParams.maxeval
-        opt.maxtime = options.optimizationParams.maxtime
-        (minf, minx, ret) = optimize(opt,xinit)
         results = GB_results(minf,minx,ret)
+
+    elseif options.algorithm == :ELD_SLSQP
+
+        results = EGB_LM(trueState, LMproblem, options)
+
     else
         error("Invalid Algorithm")
     end
 
-    if GBcleanup
-        opti = optimizationOptions(Parameterization = MRP, algorithm = :LD_SLSQP)
-        opt = Opt(opti.algorithm,3)
-        gbf = costFuncGenNLopt(sat,scen,Atrue,options,1.0,1.0)
-        opt.min_objective = gbf
-        opt.lower_bounds = [-1;-1;-1]
-        opt.upper_bounds = [1;1;1]
-        opt.maxeval = 1000
-        opt.maxtime = 1
-
-        cluster_xopt = results.clusterxOptHist[end]
-        cluster_fopt = results.clusterfOptHist[end]
-
-        cleaned_xopt = similar(cluster_xopt)
-        cleaned_fopt = similar(cluster_fopt)
-
-        for i = 1:size(cluster_xopt,1)
-            if options.algorithm == :MPSO
-                xinit = q2p(cluster_xopt[:,i])
-            else
-                xinit = cluster_xopt[:,i]
-            end
-            if norm(xinit) > 1
-                xinit = -xinit/dot(xinit,xinit)
-            end
-            (minf, minx, ret) = optimize(opt,xinit)
-
-            # if gbf(minx,[0;0;0.0]) != minf
-            #     @infiltrate
-            # end
-            # if any(isnan.(minx)) | any(isnan.(p2q(minx)))
-            #     @infiltrate
-            # end
-            # if abs(norm(p2q(minx))-1) > .000001
-            #     @infiltrate
-            # end
-            if options.algorithm == :MPSO
-                cleaned_xopt[:,i] = p2q(minx)
-            else
-                cleaned_xopt[:,i] = minx
-            end
-
-            cleaned_fopt[i] = minf
-        end
-
-        (fopt,minind) = findmin(cleaned_fopt)
-        resultsOut = PSO_results(results.xHist, results.fHist, results.xOptHist,
-         results.fOptHist, results.clusterxOptHist,results.clusterfOptHist,
-         cleaned_xopt[:,minind], fopt)
-    else
-        resultsOut = results
-    end
-
-
-    return resultsOut
+    return results
 end
 
-function singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
     if options.Parameterization == quaternion
         if length(trueState) == 3
@@ -165,19 +119,19 @@ function singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProble
         end
     end
 
-    results = _singleAttAnalysis(trueState, LMproblem, options, GBcleanup)
+    results = _singleAttAnalysis(trueState, LMproblem, options)
 
     return LMoptimizationResults(results, trueState, LMproblem, options)
 end
 
-function randomAttAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function randomAttAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
     trueAttitudes = randomAtt(N, options.Parameterization, options.vectorize)
 
-    return multiAttAnalysis(N, trueAttitudes, LMproblem, options, GBcleanup)
+    return multiAttAnalysis(N, trueAttitudes, LMproblem, options)
 end
 
-function randomStateAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function randomStateAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
 
     at_true = randomAtt(options.optimizationParams.N, options.Parameterization)
@@ -190,10 +144,10 @@ function randomStateAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), op
         ST_true = at_true
     end
 
-    return multiAttAnalysis(N, ST_true, LMproblem, options, GBcleanup)
+    return multiAttAnalysis(N, ST_true, LMproblem, options)
 end
 
-function multiAttAnalysis(N :: Int64, states, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(), GBcleanup = false)
+function multiAttAnalysis(N :: Int64, states, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
 
     resultsFull = Array{LMoptimizationResults,1}(undef,N)
@@ -207,7 +161,7 @@ function multiAttAnalysis(N :: Int64, states, LMproblem = LMoptimizationProblem(
             x = states
         end
 
-        resultsFullTemp = _singleAttAnalysis(x, LMproblem, options, GBcleanup)
+        resultsFullTemp = _singleAttAnalysis(x, LMproblem, options)
 
         resultsFull[i] = LMoptimizationResults(resultsFullTemp, x, LMproblem, options)
         sleep(.1)
@@ -217,7 +171,7 @@ function multiAttAnalysis(N :: Int64, states, LMproblem = LMoptimizationProblem(
     return resultsFull
 end
 
-function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptimizationOptions, N :: Int64, LMprob = LMoptimizationProblem(), GBcleanup = (false,false))
+function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptimizationOptions, N :: Int64, LMprob = LMoptimizationProblem())
 
     trueAttitudes = randomAtt(N,DCM,opt1.vectorize)
     if opt1.algorithm == :MPSO_full_state | opt2.algorithm == :MPSO_full_state
@@ -255,7 +209,7 @@ function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptim
             x1 = f1(A)
         end
 
-        rF1 = _singleAttAnalysis(x1, LMprob, opt1, GBcleanup[1])
+        rF1 = _singleAttAnalysis(x1, LMprob, opt1)
 
         if opt2.algorithm == :MPSO_full_state
             x2 = [f2(A);w]
@@ -263,7 +217,7 @@ function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptim
             x2 = f2(A)
         end
 
-        rf2 = _singleAttAnalysis(x2, LMprob, opt2,  GBcleanup[2])
+        rf2 = _singleAttAnalysis(x2, LMprob, opt2)
 
 
         resultsFull1[i] = LMoptimizationResults(rF1, x1, LMprob, opt1)
@@ -273,3 +227,5 @@ function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptim
 
     return (resultsFull1, resultsFull2)
 end
+
+end # module
