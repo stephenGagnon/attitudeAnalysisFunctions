@@ -30,6 +30,13 @@ export randomAttAnalysis, generateLMData, findLevelSets, monteCarloAttAnalysis, 
 
 function monteCarloAttAnalysis(trueState :: Vector, N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions(); show_progress = true)
 
+    # check if input true state dimension matches the specified parameterization and do transformations if possible
+    if LMproblem.fullState
+        trueState = vcat(attitudeConverter(trueState[1:end-3], options.Parameterization, LMproblem.a, LMproblem.f), trueState[end-2:end])
+    else
+        trueState = attitudeConverter(trueState, options.Parameterization, LMproblem.a, LMproblem.f)
+    end
+
     resultsFull = Array{LMoptimizationResults,1}(undef,N)
     if show_progress
         print("Running Optimization")
@@ -37,7 +44,7 @@ function monteCarloAttAnalysis(trueState :: Vector, N :: Int64, LMproblem = LMop
     end
 
     for i = 1:N
-        resultsFull[i] = singleAttAnalysis(trueState, LMproblem, options)
+        resultsFull[i] = LMoptimizationResults(_singleAttAnalysis(trueState, LMproblem, options), trueState, LMproblem, options)
         if show_progress
             sleep(.1)
             next!(p)
@@ -49,13 +56,13 @@ end
 
 function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
-    if any(options.algorithm .== [:MPSO, :MPSO_VGC, :MPSO_NVC, :PSO_cluster, :MPSO_full_state])
+    if any(options.algorithm .== [:MPSO, :MPSO_VGC, :MPSO_NVC, :PSO_cluster])
 
         results = PSO_LM(trueState, LMproblem, options)
 
     elseif options.algorithm == :MPSO_AVC
 
-        costFunc = costFuncGenPSO(trueState, LMproblem, options.Parameterization, true)
+        costFunc = costFuncGenPSO(trueState, LMproblem, options.optimizationParams.N, options.Parameterization, true, options.vectorize)
         clusterFunc = (x,N,cl) -> cl[:] = (assignments(kmeans(x,N)))
 
         if options.initMethod == :random
@@ -82,7 +89,7 @@ function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProbl
         end
         # @infiltrate
         options = @set options.initVals = xinit
-        costFunc = costFuncGenFD(trueState, LMproblem)
+        costFunc = costFuncGen(trueState, LMproblem, MRP, true)
         (minf, minx, ret) = GB_main(costFunc, options)
 
         results = GB_results(minf,minx,ret)
@@ -100,25 +107,14 @@ end
 
 function singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
 
-    if options.Parameterization == quaternion
-        if length(trueState) == 3
-            trueState = p2q(trueState, LMproblem.a, LMproblem.f)
-        elseif length(trueState) == 4
-
-        else
-            error("invalid state")
-        end
-
-    elseif options.Parameterization <: Union{MRP,GRP}
-        if length(trueState) == 4
-            trueState = q2p(trueState, LMproblem.a, LMproblem.f)
-        elseif length(trueState) == 3
-
-        else
-            error("invalid state")
-        end
+    # check if input true state dimension matches the specified parameterization and do transformations if possible
+    if LMproblem.fullState
+        trueState = vcat(attitudeConverter(trueState[1:end-3], options.Parameterization, LMproblem.a, LMproblem.f), trueState[end-2:end])
+    else
+        trueState = attitudeConverter(trueState, options.Parameterization, LMproblem.a, LMproblem.f)
     end
 
+    # run optimization
     results = _singleAttAnalysis(trueState, LMproblem, options)
 
     return LMoptimizationResults(results, trueState, LMproblem, options)
@@ -136,7 +132,7 @@ function randomStateAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), op
 
     at_true = randomAtt(options.optimizationParams.N, options.Parameterization)
 
-    if any(options.algorithm .== (:MPSO_full_state))
+    if LMproblem.fullState
         w_true = randomBoundedAngularVelocity(options.optimizationParams.N, LMproblem.angularVelocityBound)
 
         ST_true = [[at_true[i];w_true[i]] for i in 1:length(at_true)]
@@ -171,10 +167,10 @@ function multiAttAnalysis(N :: Int64, states, LMproblem = LMoptimizationProblem(
     return resultsFull
 end
 
-function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptimizationOptions, N :: Int64, LMprob = LMoptimizationProblem())
+function optimizationComparison(opt1 :: LMoptimizationOptions, opt2 :: LMoptimizationOptions, N :: Int64, LMprob = LMoptimizationProblem())
 
     trueAttitudes = randomAtt(N,DCM,opt1.vectorize)
-    if opt1.algorithm == :MPSO_full_state | opt2.algorithm == :MPSO_full_state
+    if LMprob.fullState
         wvec = randomBoundedAngularVelocity(N, LMprob.angularVelocityBound)
     end
 
@@ -203,20 +199,15 @@ function optimizationComparison(opt1 :: LMoptimizationOptions, LMopt2 :: LMoptim
             w = wvec
         end
 
-        if opt1.algorithm == :MPSO_full_state
+        if LMprob.fullState
             x1 = [f1(A);w]
-        else
-            x1 = f1(A)
-        end
-
-        rF1 = _singleAttAnalysis(x1, LMprob, opt1)
-
-        if opt2.algorithm == :MPSO_full_state
             x2 = [f2(A);w]
         else
+            x1 = f1(A)
             x2 = f2(A)
         end
 
+        rF1 = _singleAttAnalysis(x1, LMprob, opt1)
         rf2 = _singleAttAnalysis(x2, LMprob, opt2)
 
 
