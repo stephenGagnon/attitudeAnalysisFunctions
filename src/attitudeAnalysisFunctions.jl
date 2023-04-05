@@ -55,11 +55,11 @@ function monteCarloAttAnalysis(trueState :: Vector, N :: Int64, LMproblem = LMop
 end
 
 function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
-
+    
     if any(options.algorithm .== [:MPSO, :MPSO_VGC, :MPSO_NVC, :PSO_cluster])
 
         results = PSO_LM(trueState, LMproblem, options)
-
+        
     elseif options.algorithm == :MPSO_AVC
 
         costFunc = costFuncGenPSO(trueState, LMproblem, options.optimizationParams.N, options.Parameterization, true, options.vectorize)
@@ -76,28 +76,52 @@ function _singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProbl
 
     elseif any(options.algorithm .== [:LD_SLSQP, :GN_CRS2_LM, :G_MLSL, :GD_STOGO, :GN_AGS, :GN_ISRES])
 
-        if options.initMethod == :random
-            xinit = randomAtt(1, options.Parameterization)
-        elseif options.initMethod == :specified
-            xinit = options.initVals
+        if LMproblem.fullState
+            if options.initMethod == :random
+                xinit = randomAttState(1, LMproblem.angularVelocityBound, options.Parameterization)
+                if norm(xinit[1:3]) >= 1
+                    xinit[1:3] = sMRP(xinit[1:3])
+                end
+
+            elseif options.initMethod == :specified
+                xinit = options.initVals
+            else
+                error("Please provide valid particle initialization method")
+            end
+            bounds = vcat(ones(length(xinit) - 3), LMproblem.angularVelocityBound .* ones(3))
         else
-            error("Please provide valid particle initialization method")
+            if options.initMethod == :random
+                xinit = randomAtt(1, options.Parameterization)
+            elseif options.initMethod == :specified
+                xinit = options.initVals
+            else
+                error("Please provide valid particle initialization method")
+            end
+        
+            if norm(xinit) >= 1
+                xinit = sMRP(xinit)
+            end
+            bounds = ones(length(xinit))
         end
 
-        if any(abs.(xinit) .> 1)
-            xinit = sMRP(xinit)
-        end
         # @infiltrate
         options = @set options.initVals = xinit
         costFunc = costFuncGen(trueState, LMproblem, MRP, true)
-        (minf, minx, ret) = GB_main(costFunc, options)
-
-        results = GB_results(minf,minx,ret)
-
+        (minf, minx, ret) = GB_main(costFunc, options, bounds)
+        # print(ret,"\n")
+        if LMproblem.fullState
+        else
+            if norm(minx) >= 1
+                xinit = sMRP(minx)
+            end
+        end
+    
+        results = GB_results(minf, minx, ret)
+    
     elseif options.algorithm == :ELD_SLSQP
-
+    
         results = EGB_LM(trueState, LMproblem, options)
-
+    
     else
         error("Invalid Algorithm")
     end
@@ -115,9 +139,14 @@ function singleAttAnalysis(trueState :: Vector, LMproblem = LMoptimizationProble
     end
 
     # run optimization
-    results = _singleAttAnalysis(trueState, LMproblem, options)
-
-    return LMoptimizationResults(results, trueState, LMproblem, options)
+    if options.saveFullHist
+        (results,data) = _singleAttAnalysis(trueState, LMproblem, options)
+        return LMoptimizationResults(results, trueState, LMproblem, options), data
+    else
+        results = _singleAttAnalysis(trueState, LMproblem, options)
+        return LMoptimizationResults(results, trueState, LMproblem, options)
+    end
+    
 end
 
 function randomAttAnalysis(N :: Int64, LMproblem = LMoptimizationProblem(), options = LMoptimizationOptions())
